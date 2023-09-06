@@ -1,9 +1,0 @@
-readimc<0.7,>=0.6.2
-tqdm<5,>=4.66.1
-
-[dev]
-check-manifest
-
-[test]
-pytest
-tox

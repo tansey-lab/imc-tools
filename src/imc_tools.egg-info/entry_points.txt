@@ -1,2 +1,0 @@
-[console_scripts]
-filter_genes = bayestme.cli.filter_genes:main
