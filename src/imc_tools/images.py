@@ -61,6 +61,8 @@ def plot_channel_onto_panorama(mcd_file,
                                output_dir,
                                panorama_idx=0,
                                overlay_color=(57, 255, 20),
+                               rotation_angle=0,
+                               flip_axis=None,
                                channel_label="DNA1"):
     """
     Plot a channel onto the panorama image
@@ -70,10 +72,16 @@ def plot_channel_onto_panorama(mcd_file,
     :param panorama_idx: If the MCD file happens to contain multiple panoramas,
                          this is the index of the panorama to use
     :param overlay_color: Color to use for transparent overlay of the channel
+    :param rotation_angle: Rotate the background image by this much before overlay
+    :param flip_axis: Flip background on this axis before overlay
     :param channel_label: Name of channel label to plot
     """
     with MCDFile(mcd_file) as f:
-        for slide_idx, slide in enumerate(f.slides):
+        for slide_idx, slide in tqdm.tqdm(
+            enumerate(f.slides),
+            position=0,
+            desc="Slides"
+        ):
             instrument_panorama = [x for x in slide.panoramas if x.metadata["Type"] == "Instrument"][panorama_idx]
 
             max_x = max([
@@ -112,8 +120,24 @@ def plot_channel_onto_panorama(mcd_file,
             y_um_per_pixel = panorama_dims[0] / (max_y - min_y)
 
             background = Image.fromarray(panorama_arr).convert("RGBA")
+
+            # rotate background
+            background = background.rotate(rotation_angle, expand=True)
+
+            if flip_axis == 0:
+                # flip on x axis
+                background = background.transpose(Image.FLIP_LEFT_RIGHT)
+            elif flip_axis == 1:
+                # flip on y axis
+                background = background.transpose(Image.FLIP_TOP_BOTTOM)
+
+
             combined = background
-            for acquisition_idx, acquisition in enumerate(slide.acquisitions):
+            for acquisition_idx, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions),
+                position=1,
+                desc="Acquisitions"
+            ):
                 channel_names = [(a if a else b) for (a, b) in
                                  zip(acquisition.channel_labels, acquisition.channel_names)]
 
