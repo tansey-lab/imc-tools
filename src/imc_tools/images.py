@@ -1,12 +1,12 @@
-import tqdm
-from readimc import MCDFile
+import logging
 import os.path
 from pathlib import Path
-from PIL import Image
-import numpy as np
-import logging
 
+import numpy as np
+import tqdm
+from PIL import Image
 from matplotlib import pyplot as plt
+from readimc import MCDFile
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ def plot_channel_onto_panorama(mcd_file,
                 # Resize the overlay image
                 overlay = overlay.resize((x_extent, y_extent))
 
-                overlay = greyscale_to_colored(overlay, color=overlay_color)
+                overlay = greyscale_to_colored_transparency(overlay, color=overlay_color)
 
                 # Prepare a blank (alpha 0) image with the same size as the background
                 temp = Image.new('RGBA', background.size, (0, 0, 0, 0))
@@ -168,10 +168,10 @@ def plot_channel_onto_panorama(mcd_file,
                 # Composite the temporary image onto the background
                 combined = Image.alpha_composite(combined, temp)
 
-        combined.save(os.path.join(output_dir, f"panorama_overlay_{slide_idx}_{channel_label}.png"))
+            combined.save(os.path.join(output_dir, f"panorama_overlay_{slide_idx}_{channel_label}.png"))
 
 
-def greyscale_to_colored(greyscale_image, color=(57, 255, 20)):
+def greyscale_to_colored_transparency(greyscale_image, color=(57, 255, 20)):
     arr = np.array(greyscale_image)
     alpha_channel = arr  # Alpha from grayscale image
     rgba_overlay = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
