@@ -21,32 +21,12 @@ def remove_outliers(arr, percentile=99.5):
     return arr
 
 
-def extract_channels(mcd_fn,
-                             selected_channels,
-                             slide_idx=0,
-                                acquisition_idx=0):
-    acquisition_arr = None
+def extract_channels(acquisition,
+                     acquisition_arr,
+                     selected_channels):
 
-    with MCDFile(mcd_fn) as f:
-        for slide_idx, slide in tqdm.tqdm(
-            enumerate(f.slides),
-            position=0,
-            desc="Slides"
-        ):
-            for acquisition_idx, acquisition in tqdm.tqdm(
-                enumerate(slide.acquisitions),
-                position=1,
-                desc="Acquisitions"
-            ):
-                if slide_idx == slide_idx and acquisition_idx == acquisition_idx:
-                    channel_names = [(a if a else b) for (a, b) in
-                                     zip(acquisition.channel_labels, acquisition.channel_names)]
-
-                    acquisition_arr = f.read_acquisition(acquisition)
-                    break
-
-    if acquisition_arr is None:
-        raise ValueError(f"Could not find slide {slide_idx} acquisition {acquisition_idx}")
+    channel_names = [(a if a else b) for (a, b) in
+                     zip(acquisition.channel_labels, acquisition.channel_names)]
 
     for channel in selected_channels:
         if channel not in channel_names:
@@ -75,26 +55,43 @@ def extract_channels(mcd_fn,
 
     combined_array = filter_hot_pixels(combined_array, thres=50)
 
-    return  np.uint8(combined_array)
+    return np.uint8(combined_array)
 
 def extract_channels_to_tiff(mcd_fn,
                          output_file,
                          selected_channels,
                          slide_idx=0,
                          acquisition_idx=0):
+    with MCDFile(mcd_fn) as f:
+        for slide_idx, slide in tqdm.tqdm(
+            enumerate(f.slides),
+            position=0,
+            desc="Slides"
+        ):
+            for acquisition_idx, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions),
+                position=1,
+                desc="Acquisitions"
+            ):
+                if acquisition_idx != acquisition_idx and slide_idx != slide_idx:
+                    continue
 
-    combined_array = extract_channels(mcd_fn,
-                                selected_channels,
-                                slide_idx=slide_idx,
-                                acquisition_idx=acquisition_idx)
+                acquisition_arr = f.read_acquisition(acquisition)
 
-    # Step 4: Convert the N-channel array back to a Pillow image
-    # Note: Standard image formats may not support N-channel images.
-    # Here, we're relying on TIFF's flexibility.
-    combined_image = Image.fromarray(np.uint8(combined_array))
+                combined_array = extract_channels(acquisition,
+                                                  acquisition_arr,
+                                                  selected_channels)
 
-    # Step 5: Save the new image as a TIFF file
-    combined_image.save(output_file)
+                # Step 4: Convert the N-channel array back to a Pillow image
+                # Note: Standard image formats may not support N-channel images.
+                # Here, we're relying on TIFF's flexibility.
+                combined_image = Image.fromarray(np.uint8(combined_array))
+
+                # Step 5: Save the new image as a TIFF file
+                combined_image.save(output_file)
+                return
+
+    raise ValueError(f"Could not find slide {slide_idx} acquisition {acquisition_idx} in {mcd_fn}")
 
 
 def plot_channels(mcd_fn, output_dir):
@@ -286,9 +283,121 @@ def greyscale_to_colored_transparency(greyscale_image, color=(57, 255, 20)):
 
 
 
+def resize_and_overlay_roi_in_panorama(
+    panorama_object,
+    panorama_image,
+    acquisition_object,
+    roi_image
+):
+    if panorama_image.mode != "RGBA":
+        raise ValueError("Panorama image must be RGBA")
+    if roi_image.mode != "RGBA":
+        raise ValueError("ROI image must be RGBA")
+
+    max_x = max([
+        float(panorama_object.metadata["SlideX1PosUm"]),
+        float(panorama_object.metadata["SlideX2PosUm"]),
+        float(panorama_object.metadata["SlideX3PosUm"]),
+        float(panorama_object.metadata["SlideX4PosUm"]),
+    ])
+
+    min_x = min([
+        float(panorama_object.metadata["SlideX1PosUm"]),
+        float(panorama_object.metadata["SlideX2PosUm"]),
+        float(panorama_object.metadata["SlideX3PosUm"]),
+        float(panorama_object.metadata["SlideX4PosUm"]),
+    ])
+
+    max_y = max([
+        float(panorama_object.metadata["SlideY1PosUm"]),
+        float(panorama_object.metadata["SlideY2PosUm"]),
+        float(panorama_object.metadata["SlideY3PosUm"]),
+        float(panorama_object.metadata["SlideY4PosUm"]),
+    ])
+
+    min_y = min([
+        float(panorama_object.metadata["SlideY1PosUm"]),
+        float(panorama_object.metadata["SlideY2PosUm"]),
+        float(panorama_object.metadata["SlideY3PosUm"]),
+        float(panorama_object.metadata["SlideY4PosUm"]),
+    ])
+
+    # convert x pixels to um
+    x_um_per_pixel = panorama_image.shape[1] / (max_x - min_x)
+    y_um_per_pixel = panorama_image.shape[0] / (max_y - min_y)
+
+    # Source: https://software.docs.hubmapconsortium.org/assays/imc.html
+    # "ROIStartXPosUm" and "ROIStartYPosUm"	Start X and Y-coordinates of the region of interest (µm).
+    # Note: This value must be divided by 1000 to correct for a bug (missing decimal point) in the Fluidigm software.
+    x1 = float(acquisition_object.metadata["ROIStartXPosUm"]) / 1000.0
+    y1 = float(acquisition_object.metadata["ROIStartYPosUm"]) / 1000.0
+    x2 = float(acquisition_object.metadata["ROIEndXPosUm"])
+    y2 = float(acquisition_object.metadata["ROIEndYPosUm"])
+
+    x_min_acq = min(x1, x2)
+    x_max_acq = max(x1, x2)
+    y_min_acq = min(y1, y2)
+    y_max_acq = max(y1, y2)
+
+    if min_x < x_max_acq < max_x and min_y < y_max_acq < max_y:
+        pass
+    else:
+        logger.warning(f"Acquisition is outside of the panorama bounds")
+        logger.warning(f"Bounding box of acquisition: {x_min_acq}, {x_max_acq}, {y_min_acq}, {y_max_acq}")
+        logger.warning(f"Bounding box of panorama: {min_x}, {max_x}, {min_y}, {max_y}")
+        raise  ValueError("Acquisition is outside of the panorama bounds")
+
+    x_pixel, y_pixel = int((x_min_acq - min_x) / x_um_per_pixel), int((max_y - y_max_acq) / y_um_per_pixel)
+    x_extent, y_extent = int((x_max_acq - x_min_acq) / x_um_per_pixel), int((y_max_acq - y_min_acq) / y_um_per_pixel)
+
+    # Resize the overlay image
+    overlay = roi_image.resize((x_extent, y_extent))
+
+    # Prepare a blank (alpha 0) image with the same size as the background
+    temp = Image.new('RGBA', panorama_image.size, (0, 0, 0, 0))
+
+    # Paste the resized overlay onto the temporary image
+    temp.paste(overlay, (x_pixel, y_pixel))
+
+    return Image.alpha_composite(panorama_image, temp)
+
+
+def plot_mask_on_to_panorama(
+        mcd_file,
+        panorama_object,
+        panorama_image,
+        mask_arr,
+        acquisition,
+        mask_color=(57, 255, 20),
+    ):
+    pass
+
 def cellpose_segment(mcd_file: str,
                      cellpose_model: cellpose.models.Cellpose,
-                     channels_to_use: list,
+                     cytoplasm_channel: str,
+                     nuclear_channel: str = None,):
 
-                     ):
-    pass
+    channels_to_use = [cytoplasm_channel] if nuclear_channel is None else [cytoplasm_channel, nuclear_channel]
+
+    with MCDFile(mcd_file) as f:
+        for slide_idx, slide in tqdm.tqdm(
+            enumerate(f.slides),
+            position=0,
+            desc="Slides"
+        ):
+            acquisition_arrays = []
+            acquisition_objects = []
+            for acquisition_idx, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions),
+                position=1,
+                desc="Acquisitions"
+            ):
+                acquisition_arr = f.read_acquisition(acquisition)
+                channel_data = extract_channels(acquisition, acquisition_arr, channels_to_use)
+                acquisition_arrays.append(channel_data)
+                acquisition_objects.append(acquisition)
+
+            masks, flows, styles, diams = cellpose_model.eval(acquisition_arrays,
+                                                          diameter=None,
+                                                          channels=[x + 1 for x in range(len(channels_to_use))]
+                                                          )
