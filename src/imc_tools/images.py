@@ -4,9 +4,12 @@ from pathlib import Path
 
 import numpy as np
 import tqdm
+import cellpose.models
+
 from PIL import Image
 from matplotlib import pyplot as plt
 from readimc import MCDFile
+from imcsegpipe.utils import filter_hot_pixels
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,82 @@ def remove_outliers(arr, percentile=99.5):
     max_value = np.percentile(arr, percentile)
     arr[arr > max_value] = max_value
     return arr
+
+
+def extract_channels(mcd_fn,
+                             selected_channels,
+                             slide_idx=0,
+                                acquisition_idx=0):
+    acquisition_arr = None
+
+    with MCDFile(mcd_fn) as f:
+        for slide_idx, slide in tqdm.tqdm(
+            enumerate(f.slides),
+            position=0,
+            desc="Slides"
+        ):
+            for acquisition_idx, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions),
+                position=1,
+                desc="Acquisitions"
+            ):
+                if slide_idx == slide_idx and acquisition_idx == acquisition_idx:
+                    channel_names = [(a if a else b) for (a, b) in
+                                     zip(acquisition.channel_labels, acquisition.channel_names)]
+
+                    acquisition_arr = f.read_acquisition(acquisition)
+                    break
+
+    if acquisition_arr is None:
+        raise ValueError(f"Could not find slide {slide_idx} acquisition {acquisition_idx}")
+
+    for channel in selected_channels:
+        if channel not in channel_names:
+            raise ValueError(f"Channel {channel} not found in {channel_names}")
+
+    image_arrays = []
+    for channel_idx, channel in enumerate(channel_names):
+        if channel in selected_channels:
+            channel_arr = Image.fromarray(acquisition_arr[channel_idx, ...]).convert('L')
+            array = np.array(channel_arr)
+            image_arrays.append(array)
+
+    # Verify that all images have the same shape
+    shape_check = image_arrays[0].shape
+    for array in image_arrays[1:]:
+        if array.shape != shape_check:
+            raise ValueError("All images must have the same dimensions.")
+
+    if len(image_arrays) < 3:
+        # add zero layers
+        for i in range(3 - len(image_arrays)):
+            image_arrays.append(np.zeros(shape_check))
+
+    # Step 3: Stack the N arrays to make an N-channel image
+    combined_array = np.stack(image_arrays, axis=2)
+
+    combined_array = filter_hot_pixels(combined_array, thres=50)
+
+    return  np.uint8(combined_array)
+
+def extract_channels_to_tiff(mcd_fn,
+                         output_file,
+                         selected_channels,
+                         slide_idx=0,
+                         acquisition_idx=0):
+
+    combined_array = extract_channels(mcd_fn,
+                                selected_channels,
+                                slide_idx=slide_idx,
+                                acquisition_idx=acquisition_idx)
+
+    # Step 4: Convert the N-channel array back to a Pillow image
+    # Note: Standard image formats may not support N-channel images.
+    # Here, we're relying on TIFF's flexibility.
+    combined_image = Image.fromarray(np.uint8(combined_array))
+
+    # Step 5: Save the new image as a TIFF file
+    combined_image.save(output_file)
 
 
 def plot_channels(mcd_fn, output_dir):
@@ -205,3 +284,11 @@ def greyscale_to_colored_transparency(greyscale_image, color=(57, 255, 20)):
     rgba_overlay[:, :, 3] = alpha_channel
     return Image.fromarray(rgba_overlay, 'RGBA')
 
+
+
+def cellpose_segment(mcd_file: str,
+                     cellpose_model: cellpose.models.Cellpose,
+                     channels_to_use: list,
+
+                     ):
+    pass
