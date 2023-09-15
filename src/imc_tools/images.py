@@ -420,18 +420,17 @@ def plot_mask_on_to_panorama(
     panorama_image,
     mask_arr,
     acquisition,
-    mask_color=(57, 255, 20),
     alpha_channel=87
 ):
     # list of rainbow colors
     colors = [
-        (255, 0, 0, alpha_channel), #red
-        (255, 127, 0, alpha_channel), #orange
-        (255, 255, 0, alpha_channel), #yellow
-        (0, 255, 0, alpha_channel), #green
-        (0, 0, 255, alpha_channel), #blue
-        (75, 0, 130, alpha_channel), #indigo
-        (148, 0, 211, alpha_channel), #violet
+        (255, 0, 0, alpha_channel),  # red
+        (255, 127, 0, alpha_channel),  # orange
+        (255, 255, 0, alpha_channel),  # yellow
+        (0, 255, 0, alpha_channel),  # green
+        (0, 0, 255, alpha_channel),  # blue
+        (75, 0, 130, alpha_channel),  # indigo
+        (148, 0, 211, alpha_channel),  # violet
     ]
 
     # for each unique value in mask arr, map to a color from the list in the image
@@ -442,19 +441,20 @@ def plot_mask_on_to_panorama(
         else:
             mask_color_map[val] = colors[idx % len(colors)]
 
-    # convert mask arr to RGBA image
-    mask_arr = np.array([mask_color_map[x] for x in mask_arr.flatten()]).reshape(
-        (mask_arr.shape[0], mask_arr.shape[1], 4)
-    )
+    output_image_array = np.zeros((mask_arr.shape[0], mask_arr.shape[1], 4), dtype=np.uint8)
 
-    mask = Image.fromarray(mask_arr.astype(np.uint8)).convert("RGBA")
-    mask_overlay = greyscale_to_colored_transparency(mask, mask_color, fixed_alpha=100)
+    # convert mask arr to RGBA image
+    for x in range(mask_arr.shape[0]):
+        for y in range(mask_arr.shape[1]):
+            output_image_array[x, y, :] = mask_color_map[mask_arr[x, y]]
+
+    mask = black_to_alpha(Image.fromarray(output_image_array, "RGBA"))
 
     return resize_and_overlay_roi_in_panorama(
         panorama_object=panorama_object,
         panorama_image=panorama_image,
         acquisition_object=acquisition,
-        roi_image=mask_overlay
+        roi_image=mask
     )
 
 
@@ -472,12 +472,11 @@ def black_to_alpha(image):
 
 
 def overlay_rgb_on_panorama(
-        mcd_file: str,
-                         red=None,
-        green=None,
-        blue=None,
-                         panorama_index=0):
-
+    mcd_file: str,
+    red=None,
+    green=None,
+    blue=None,
+    panorama_index=0):
     with MCDFile(mcd_file) as f:
         for slide_idx, slide in tqdm.tqdm(
             enumerate(f.slides),
@@ -499,8 +498,8 @@ def overlay_rgb_on_panorama(
                 acquisition_arr = f.read_acquisition(acquisition)
                 rbg_img = Image.fromarray(extract_channels_to_rgb(
                     acquisition,
-                                               acquisition_arr,
-                                                red=red,
+                    acquisition_arr,
+                    red=red,
                     green=green,
                     blue=blue
                 )).convert("RGBA")
@@ -537,7 +536,6 @@ def cellpose_segment(mcd_file: str,
             acquisition_arrays = []
             acquisition_objects = []
 
-
             panorama = [x for x in slide.panoramas if x.metadata["Type"] == "Instrument"][panorama_index]
             panorama_img = Image.fromarray(f.read_panorama(panorama)).convert("RGBA")
 
@@ -557,7 +555,7 @@ def cellpose_segment(mcd_file: str,
                                                               channels=[x + 1 for x in range(len(channels_to_use))] + [
                                                                   0]
                                                               )
-            mask_arrays= []
+            mask_arrays = []
             for mask, acquisition in zip(masks, acquisition_objects):
                 try:
                     mask_arrays.append(mask.copy())
