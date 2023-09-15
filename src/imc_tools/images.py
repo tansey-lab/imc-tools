@@ -434,9 +434,20 @@ def plot_mask_on_to_panorama(
         (148, 0, 211, alpha_channel), #violet
     ]
 
+    # for each unique value in mask arr, map to a color from the list in the image
+    mask_color_map = {}
+    for idx, val in enumerate(np.unique(mask_arr)):
+        if val == 0:
+            mask_color_map[val] = (0, 0, 0, 0)
+        else:
+            mask_color_map[val] = colors[idx % len(colors)]
 
+    # convert mask arr to RGBA image
+    mask_arr = np.array([mask_color_map[x] for x in mask_arr.flatten()]).reshape(
+        (mask_arr.shape[0], mask_arr.shape[1], 4)
+    )
 
-    mask = Image.fromarray(mask_arr.astype(np.uint8)).convert("L")
+    mask = Image.fromarray(mask_arr.astype(np.uint8)).convert("RGBA")
     mask_overlay = greyscale_to_colored_transparency(mask, mask_color, fixed_alpha=100)
 
     return resize_and_overlay_roi_in_panorama(
@@ -599,12 +610,8 @@ def deepcell_nuclear_segment(
                         acquisition, acquisition_arr, channels_to_use))[np.newaxis, ..., np.newaxis]
 
                 labeled_nuclear_arr = app.predict(im, image_mpp=1.0)
-
-                labeled_nuclear_arr = labeled_nuclear_arr[0, :, :, 0]
-
                 labeled_rois.append(labeled_nuclear_arr.copy())
-
-                labeled_nuclear_arr[labeled_nuclear_arr > 0] = 255
+                labeled_nuclear_arr = labeled_nuclear_arr[0, :, :, 0]
 
                 panorama_img = plot_mask_on_to_panorama(
                     panorama_object=panorama,
