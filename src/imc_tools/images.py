@@ -25,6 +25,11 @@ def remove_outliers(arr, percentile=99.5):
     return arr
 
 
+def normalize(arr):
+    # normalize between 0-255
+    return arr / np.max(arr)
+
+
 def extract_channel(acquisition,
                     acquisition_arr,
                     selected_channel):
@@ -37,6 +42,7 @@ def extract_channel(acquisition,
     for channel_idx, channel in enumerate(channel_names):
         if channel == selected_channel:
             array = remove_outliers(acquisition_arr[channel_idx, ...])
+            array = normalize(array)
             return array
 
 
@@ -519,12 +525,10 @@ def overlay_rgb_on_panorama(
 
 
 def cellpose_segment(mcd_file: str,
-                     nuclear_channel: str,
-                     panorama_index=0):
+                     channels_to_use,
+                     panorama_index=0,
+                     masks=None):
     cellpose_model = cellpose.models.Cellpose(model_type='nuclei')
-
-    channels_to_use = [nuclear_channel]
-    # channels_to_use = [cytoplasm_channel] if nuclear_channel is None else [cytoplasm_channel, nuclear_channel]
 
     with MCDFile(mcd_file) as f:
         for slide_idx, slide in tqdm.tqdm(
@@ -547,19 +551,85 @@ def cellpose_segment(mcd_file: str,
             ):
                 acquisition_arr = f.read_acquisition(acquisition)
                 channel_data = extract_channels(acquisition, acquisition_arr, channels_to_use)
+                if len(channels_to_use) == 1:
+                    channel_data = remove_outliers(extract_channel(
+                        acquisition, acquisition_arr, channels_to_use[0]))
+                elif len(channels_to_use) > 1:
+                    channel_data = remove_outliers(extract_maximum_projection_of_channels(
+                        acquisition, acquisition_arr, channels_to_use))
+
                 acquisition_arrays.append(channel_data)
                 acquisition_objects.append(acquisition)
 
-            masks, flows, styles, diams = cellpose_model.eval(acquisition_arrays,
-                                                              diameter=None,
-                                                              channels=[x + 1 for x in range(len(channels_to_use))] + [
-                                                                  0]
-                                                              )
+            if masks is None:
+                masks, flows, styles, diams = cellpose_model.eval(acquisition_arrays,
+                                                                  diameter=None,
+                                                                  channels=[0, 0]
+                                                                  )
             mask_arrays = []
             for mask, acquisition in zip(masks, acquisition_objects):
                 try:
                     mask_arrays.append(mask.copy())
-                    mask[mask > 0] = 255
+
+                    panorama_img = plot_mask_on_to_panorama(
+                        panorama_object=panorama,
+                        panorama_image=panorama_img,
+                        mask_arr=mask,
+                        acquisition=acquisition,
+                    )
+                except AcquisitionOutOfBoundsError:
+                    continue
+
+            return panorama_img, mask_arrays
+
+
+def cellpose_cyto_segment(mcd_file: str,
+                     nuclear_channels,
+                        cyto_channels,
+                     panorama_index=0,
+                     masks=None):
+    cellpose_model = cellpose.models.Cellpose(model_type='cyto')
+
+    with MCDFile(mcd_file) as f:
+        for slide_idx, slide in tqdm.tqdm(
+            enumerate(f.slides),
+            total=len(f.slides),
+            position=0,
+            desc="Slides"
+        ):
+            acquisition_arrays = []
+            acquisition_objects = []
+
+            panorama = [x for x in slide.panoramas if x.metadata["Type"] == "Instrument"][panorama_index]
+            panorama_img = Image.fromarray(f.read_panorama(panorama)).convert("RGBA")
+
+            for acquisition_idx, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions),
+                position=1,
+                total=len(slide.acquisitions),
+                desc="Acquisitions"
+            ):
+                acquisition_arr = f.read_acquisition(acquisition)
+
+                rgb_data = extract_channels_to_rgb(
+                    acquisition=acquisition,
+                    acquisition_arr=acquisition_arr,
+                    red=nuclear_channels,
+                    green=cyto_channels,
+                )
+
+                acquisition_arrays.append(rgb_data)
+                acquisition_objects.append(acquisition)
+
+            if masks is None:
+                masks, flows, styles, diams = cellpose_model.eval(acquisition_arrays,
+                                                                  diameter=None,
+                                                                  channels=[2, 1]
+                                                                  )
+            mask_arrays = []
+            for mask, acquisition in zip(masks, acquisition_objects):
+                try:
+                    mask_arrays.append(mask.copy())
 
                     panorama_img = plot_mask_on_to_panorama(
                         panorama_object=panorama,
