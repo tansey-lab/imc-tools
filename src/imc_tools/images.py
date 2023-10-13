@@ -26,7 +26,6 @@ def remove_outliers(arr, percentile=99.5):
 
 
 def normalize(arr):
-    # normalize between 0-255
     return arr / np.max(arr)
 
 
@@ -42,7 +41,6 @@ def extract_channel(acquisition, acquisition_arr, selected_channel):
     for channel_idx, channel in enumerate(channel_names):
         if channel == selected_channel:
             array = remove_outliers(acquisition_arr[channel_idx, ...])
-            array = normalize(array)
             return array
 
 
