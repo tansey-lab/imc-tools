@@ -56,22 +56,22 @@ def is_likely_unused_channel(channel_label, channel_name):
 
 
 def get_channels(acquisition):
-    for label, name in zip(acquisition.channel_labels, acquisition.channel_names):
+    for idx, (label, name) in enumerate(zip(acquisition.channel_labels, acquisition.channel_names)):
         if is_likely_unused_channel(label, name):
             continue
-        yield label
+        yield idx, label
 
 
 def extract_channel(acquisition, acquisition_arr, selected_channel):
-    channel_names = [ x for x in get_channels(acquisition)]
+    channel_names = [ x[1] for x in get_channels(acquisition)]
 
     if selected_channel not in channel_names:
         raise ValueError(f"Channel {selected_channel} not found in {channel_names}")
 
-    for channel_idx, channel in enumerate(channel_names):
-        if channel == selected_channel:
-            array = remove_outliers(acquisition_arr[channel_idx, ...])
-            return array
+    channel_idx = [idx for (idx, name) in get_channels(acquisition) if name == selected_channel][0]
+
+    array = remove_outliers(acquisition_arr[channel_idx, ...])
+    return array
 
 
 def extract_channels(acquisition, acquisition_arr, selected_channels):
@@ -87,7 +87,7 @@ def extract_channels(acquisition, acquisition_arr, selected_channels):
 
 
 def extract_all_used_channels(acquisition, acquisition_arr):
-    all_channels = [c for c in get_channels(acquisition)]
+    all_channels = [c[1] for c in get_channels(acquisition)]
 
     return extract_channels(acquisition, acquisition_arr, all_channels)
 
@@ -134,29 +134,27 @@ def extract_channels_to_tiff(
     mcd_fn, output_file, selected_channels, slide_idx=0, acquisition_idx=0
 ):
     with MCDFile(mcd_fn) as f:
-        for slide_idx, slide in tqdm.tqdm(
+        for slide_idx_it, slide in tqdm.tqdm(
             enumerate(f.slides), position=0, desc="Slides"
         ):
-            for acquisition_idx, acquisition in tqdm.tqdm(
+            for acquisition_idx_it, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                if acquisition_idx != acquisition_idx and slide_idx != slide_idx:
-                    continue
+                if acquisition_idx == acquisition_idx_it or slide_idx == slide_idx_it:
+                    acquisition_arr = f.read_acquisition(acquisition)
 
-                acquisition_arr = f.read_acquisition(acquisition)
+                    combined_array = extract_channels(
+                        acquisition, acquisition_arr, selected_channels
+                    )
 
-                combined_array = extract_channels(
-                    acquisition, acquisition_arr, selected_channels
-                )
+                    # Step 4: Convert the N-channel array back to a Pillow image
+                    # Note: Standard image formats may not support N-channel images.
+                    # Here, we're relying on TIFF's flexibility.
+                    combined_image = Image.fromarray(np.uint8(combined_array))
 
-                # Step 4: Convert the N-channel array back to a Pillow image
-                # Note: Standard image formats may not support N-channel images.
-                # Here, we're relying on TIFF's flexibility.
-                combined_image = Image.fromarray(np.uint8(combined_array))
-
-                # Step 5: Save the new image as a TIFF file
-                combined_image.save(output_file)
-                return
+                    # Step 5: Save the new image as a TIFF file
+                    combined_image.save(output_file)
+                    return
 
     raise ValueError(
         f"Could not find slide {slide_idx} acquisition {acquisition_idx} in {mcd_fn}"
@@ -173,12 +171,11 @@ def extract_channel_to_arr(
             for acquisition_idx_it, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                if acquisition_idx != acquisition_idx_it and slide_idx != slide_idx_it:
-                    continue
-                acquisition_arr = f.read_acquisition(acquisition)
-                return extract_channel(
-                    acquisition, acquisition_arr, selected_channel
-                )
+                if acquisition_idx == acquisition_idx_it and slide_idx == slide_idx_it:
+                    acquisition_arr = f.read_acquisition(acquisition)
+                    return extract_channel(
+                        acquisition, acquisition_arr, selected_channel
+                    )
 
 
 def extract_all_channels_to_arr(
@@ -209,12 +206,10 @@ def plot_channels(mcd_fn, output_dir):
             for acquisition_idx, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                channel_names = [x for x in get_channels(acquisition)]
-
                 img = f.read_acquisition(acquisition)
 
                 for idx, channel_name in tqdm.tqdm(
-                    enumerate(channel_names), position=2, desc="Channels"
+                    get_channels(acquisition), position=2, desc="Channels"
                 ):
                     arr = img[idx, ...].copy()
 
@@ -322,14 +317,14 @@ def plot_channel_onto_panorama(
             for acquisition_idx, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                channel_labels = [x for x in get_channels(acquisition)]
+                channel_labels = [x[1] for x in get_channels(acquisition)]
 
                 if channel_label not in channel_labels:
                     raise ValueError(
                         f"Channel {channel_label} not found in {channel_labels}"
                     )
 
-                channel_idx = channel_labels.index(channel_label)
+                channel_idx = [idx for idx, name in get_channels(acquisition) if name == channel_label][0]
 
                 img = f.read_acquisition(acquisition)
 
