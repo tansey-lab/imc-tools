@@ -5,11 +5,11 @@ from pathlib import Path
 import numpy as np
 import tqdm
 import cellpose.models
+import re
 
 from PIL import Image
 from matplotlib import pyplot as plt
 from readimc import MCDFile
-from imcsegpipe.utils import filter_hot_pixels
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,41 @@ def normalize(arr):
     return arr / np.max(arr)
 
 
+def is_likely_unused_channel(channel_label, channel_name):
+    if not channel_label:
+        return True
+
+    if channel_label.strip().lower() == channel_name.strip().lower():
+        return True
+
+    channel_label_numbers = re.findall("\d+", channel_label)
+    channel_name_numbers = re.findall("\d+", channel_name)
+
+    if not len(channel_label_numbers) == 1 and len(channel_name_numbers) == 1:
+        return False
+
+    channel_label_alphas = re.findall("[A-Za-z]+", channel_label)
+    channel_name_alphas = re.findall("[A-Za-z]+", channel_name)
+
+    if not len(channel_label_alphas) == 1 and len(channel_name_alphas) == 1:
+        return False
+
+    if (channel_label_alphas[0].lower() == channel_name_alphas[0].lower() and
+            channel_label_numbers[0].lower() == channel_name_numbers[0].lower()):
+        return True
+
+    return False
+
+
+def get_channels(acquisition):
+    for label, name in zip(acquisition.channel_labels, acquisition.channel_names):
+        if is_likely_unused_channel(label, name):
+            continue
+        yield label
+
+
 def extract_channel(acquisition, acquisition_arr, selected_channel):
-    channel_names = [
-        (a if a else b)
-        for (a, b) in zip(acquisition.channel_labels, acquisition.channel_names)
-    ]
+    channel_names = [ x for x in get_channels(acquisition)]
 
     if selected_channel not in channel_names:
         raise ValueError(f"Channel {selected_channel} not found in {channel_names}")
@@ -55,6 +85,11 @@ def extract_channels(acquisition, acquisition_arr, selected_channels):
 
     return np.uint8(combined_array)
 
+
+def extract_all_used_channels(acquisition, acquisition_arr):
+    all_channels = [c for c in get_channels(acquisition)]
+
+    return extract_channels(acquisition, acquisition_arr, all_channels)
 
 def extract_maximum_projection_of_channels(
     acquisition, acquisition_arr, selected_channels
@@ -128,6 +163,41 @@ def extract_channels_to_tiff(
     )
 
 
+def extract_channel_to_arr(
+    mcd_fn, selected_channel, slide_idx=0, acquisition_idx=0
+):
+    with MCDFile(mcd_fn) as f:
+        for slide_idx_it, slide in tqdm.tqdm(
+            enumerate(f.slides), position=0, desc="Slides"
+        ):
+            for acquisition_idx_it, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions), position=1, desc="Acquisitions"
+            ):
+                if acquisition_idx != acquisition_idx_it and slide_idx != slide_idx_it:
+                    continue
+                acquisition_arr = f.read_acquisition(acquisition)
+                return extract_channel(
+                    acquisition, acquisition_arr, selected_channel
+                )
+
+
+def extract_all_channels_to_arr(
+    mcd_fn, slide_idx=0, acquisition_idx=0
+):
+    with MCDFile(mcd_fn) as f:
+        for slide_idx_it, slide in tqdm.tqdm(
+            enumerate(f.slides), position=0, desc="Slides"
+        ):
+            for acquisition_idx_it, acquisition in tqdm.tqdm(
+                enumerate(slide.acquisitions), position=1, desc="Acquisitions"
+            ):
+                if acquisition_idx == acquisition_idx_it and slide_idx == slide_idx_it:
+                    acquisition_arr = f.read_acquisition(acquisition)
+                    return extract_all_used_channels(
+                        acquisition, acquisition_arr
+                    )
+
+
 def plot_channels(mcd_fn, output_dir):
     path = Path(output_dir)
     path.mkdir(parents=True, exist_ok=True)
@@ -139,12 +209,7 @@ def plot_channels(mcd_fn, output_dir):
             for acquisition_idx, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                channel_names = [
-                    (a if a else b)
-                    for (a, b) in zip(
-                        acquisition.channel_labels, acquisition.channel_names
-                    )
-                ]
+                channel_names = [x for x in get_channels(acquisition)]
 
                 img = f.read_acquisition(acquisition)
 
@@ -257,19 +322,14 @@ def plot_channel_onto_panorama(
             for acquisition_idx, acquisition in tqdm.tqdm(
                 enumerate(slide.acquisitions), position=1, desc="Acquisitions"
             ):
-                channel_names = [
-                    (a if a else b)
-                    for (a, b) in zip(
-                        acquisition.channel_labels, acquisition.channel_names
-                    )
-                ]
+                channel_labels = [x for x in get_channels(acquisition)]
 
-                if channel_label not in channel_names:
+                if channel_label not in channel_labels:
                     raise ValueError(
-                        f"Channel {channel_label} not found in {channel_names}"
+                        f"Channel {channel_label} not found in {channel_labels}"
                     )
 
-                channel_idx = channel_names.index(channel_label)
+                channel_idx = channel_labels.index(channel_label)
 
                 img = f.read_acquisition(acquisition)
 
@@ -502,6 +562,16 @@ def black_to_alpha(image):
     # Convert the NumPy array back to a PIL image and save
     return Image.fromarray(image_array, "RGBA")
 
+
+def overlay_arrays_as_images(arr1, arr2):
+    img1 = Image.fromarray(arr1).convert("L")
+    img2 = Image.fromarray(arr2).convert("L")
+
+    img1_color = greyscale_to_colored_transparency(img1, color=(255, 0, 0)).show()
+    img2_color = greyscale_to_colored_transparency(img2, color=(0, 255, 0)).show()
+
+    overlay = Image.alpha_composite(img1_color, img2_color)
+    return overlay
 
 def overlay_rgb_on_panorama(
     mcd_file: str, red=None, green=None, blue=None, panorama_index=0
