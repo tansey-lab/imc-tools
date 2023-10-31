@@ -1,6 +1,6 @@
 FROM python:3.11
 
-RUN apt-get update && apt-get install cmake libcgal-dev libeigen3-dev swig
+RUN apt-get update && apt-get install cmake libcgal-dev libeigen3-dev swig ffmpeg libsm6 libxext6 -y
 RUN pip install --upgrade pip
 
 RUN git clone https://github.com/cgal/cgal-swig-bindings && \

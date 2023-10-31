@@ -26,7 +26,8 @@ classifiers = [
 dependencies = [
     "readimc>=0.6.2,<0.7",
     "tqdm>=4.66.1,<5",
-    "cellpose==2.2.3"
+    "cellpose==2.2.3",
+    "opencv-python"
 ]
 
 [project.optional-dependencies]
