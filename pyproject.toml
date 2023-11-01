@@ -27,7 +27,9 @@ dependencies = [
     "readimc>=0.6.2,<0.7",
     "tqdm>=4.66.1,<5",
     "cellpose==2.2.3",
-    "opencv-python"
+    "opencv-python",
+    "opencv-contrib-python",
+    "higra"
 ]
 
 [project.optional-dependencies]
@@ -45,3 +47,7 @@ test = ["pytest", "tox"]
 [build-system]
 requires = ["setuptools>=43.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+
+[options.package_data]
+imc_tools = ["model.yml.gz"]
