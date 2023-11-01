@@ -29,7 +29,9 @@ dependencies = [
     "cellpose==2.2.3",
     "opencv-python",
     "opencv-contrib-python",
-    "higra"
+    "higra",
+    "scikit-learn",
+    "matplotlib"
 ]
 
 [project.optional-dependencies]
