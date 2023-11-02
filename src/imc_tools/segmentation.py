@@ -3,6 +3,7 @@ import numpy as np
 import tqdm
 from PIL import Image
 from readimc import MCDFile
+from imc_tools.mcd import get_acquisition
 
 from imc_tools.images import AcquisitionOutOfBoundsError, \
     remove_outliers
@@ -115,7 +116,38 @@ def deepcell_nuclear_segment(mcd_file: str, channels_to_use=None, panorama_index
             return panorama_img, labeled_rois
 
 
-def cellpose_segment(mcd_file: str,
+def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_index=0):
+    cellpose_model = cellpose.models.Cellpose(model_type="nuclei")
+
+    with MCDFile(mcd_file) as f:
+        slide, acquisition = get_acquisition(f, slide_index, acquisition_index)
+
+
+        acquisition_arr = f.read_acquisition(acquisition)
+        channel_data = extract_channels(
+            acquisition, acquisition_arr, channels_to_use
+        )
+        if len(channels_to_use) == 1:
+            channel_data = remove_outliers(
+                extract_channel(
+                    acquisition, acquisition_arr, channels_to_use[0]
+                )
+            )
+        elif len(channels_to_use) > 1:
+            channel_data = remove_outliers(
+                extract_maximum_projection_of_channels(
+                    acquisition, acquisition_arr, channels_to_use
+                )
+            )
+
+        masks, flows, styles, diams = cellpose_model.eval(
+            [channel_data], diameter=None, channels=[0, 0]
+        )
+
+        return masks, flows, styles, diams
+
+
+def cellpose_segment_all_and_plot(mcd_file: str,
                      channels_to_use,
                      panorama_index=0,
                      masks=None):

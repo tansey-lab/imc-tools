@@ -173,3 +173,26 @@ def get_cell_body_mask(all_channel_sum):
      if val >= cutoff_point]
 
     return np.isin(segmented_image, cell_body_segments)
+
+
+def get_cell_body_mask_with_nuclear_segmentation(all_channel_sum, segmentation_mask):
+    clahe_image = apply_clahe(all_channel_sum)
+    gradient_image = get_image_gradient(clahe_image)
+    segmented_image = get_segmented_image(gradient_image, num_regions=500)
+
+    segmentation_mask = segmentation_mask.copy()
+    segmentation_mask[segmentation_mask > 0] = 1
+
+    intensity_per_segment = get_total_intensity_per_segment(
+        original_image=segmentation_mask,
+        segmented_image=segmented_image
+    )
+    cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
+        np.array([x for x in intensity_per_segment.values()])
+    )
+
+    cell_body_segments = [
+     segment_id for segment_id, val in intensity_per_segment.items()
+     if val >= cutoff_point]
+
+    return np.isin(segmented_image, cell_body_segments)
