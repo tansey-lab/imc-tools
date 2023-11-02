@@ -118,12 +118,14 @@ def get_total_intensity_per_segment(original_image, segmented_image):
 
     unique_segments = np.unique(segmented_image)
 
-    result = {}
+    means = {}
+    sums = {}
 
     for unique_segment in unique_segments:
-        result[unique_segment] = original_image[(segmented_image == unique_segment)].mean()
+        means[unique_segment] = original_image[(segmented_image == unique_segment)].mean()
+        sums[unique_segment] = original_image[(segmented_image == unique_segment)].sum()
 
-    return result
+    return means, sums
 
 
 def get_mixture_of_two_gaussians_cutoff_point(arr):
@@ -160,39 +162,84 @@ def get_cell_body_mask(all_channel_sum):
     clahe_image = apply_clahe(all_channel_sum)
     gradient_image = get_image_gradient(clahe_image)
     segmented_image = get_segmented_image(gradient_image, num_regions=500)
-    intensity_per_segment = get_total_intensity_per_segment(
+    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
         original_image=all_channel_sum,
         segmented_image=segmented_image
     )
     cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
-        np.array([x for x in intensity_per_segment.values()])
+        np.array([x for x in mean_intensity_per_segment.values()])
     )
 
     cell_body_segments = [
-     segment_id for segment_id, val in intensity_per_segment.items()
+     segment_id for segment_id, val in mean_intensity_per_segment.items()
      if val >= cutoff_point]
 
     return np.isin(segmented_image, cell_body_segments)
 
 
-def get_cell_body_mask_with_nuclear_segmentation(all_channel_sum, segmentation_mask):
+def get_cell_body_mask_with_nuclear_segmentation(all_channel_sum, segmentation_mask, num_regions=500):
     clahe_image = apply_clahe(all_channel_sum)
     gradient_image = get_image_gradient(clahe_image)
-    segmented_image = get_segmented_image(gradient_image, num_regions=500)
+    segmented_image = get_segmented_image(gradient_image, num_regions=num_regions)
 
     segmentation_mask = segmentation_mask.copy()
     segmentation_mask[segmentation_mask > 0] = 1
 
-    intensity_per_segment = get_total_intensity_per_segment(
+    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
         original_image=segmentation_mask,
         segmented_image=segmented_image
     )
     cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
-        np.array([x for x in intensity_per_segment.values()])
+        np.array([x for x in mean_intensity_per_segment.values()])
     )
 
     cell_body_segments = [
-     segment_id for segment_id, val in intensity_per_segment.items()
+     segment_id for segment_id, val in mean_intensity_per_segment.items()
      if val >= cutoff_point]
 
     return np.isin(segmented_image, cell_body_segments)
+
+
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+
+def plot_segmentation_borders(segmentation_mask, output_path):
+    # Plotting
+    fig, ax = plt.subplots()
+
+    for i in np.unique(segmentation_mask):
+        segment_of_interest = (segmentation_mask == i).astype(bool).astype(np.uint8)
+        segment_of_interest[segment_of_interest > 0] = 255
+        # Find contours in the binary image
+        contours, hierarchy = cv2.findContours(segment_of_interest.astype(np.uint8),
+                                               cv2.RETR_EXTERNAL,
+                                               cv2.CHAIN_APPROX_SIMPLE)
+
+
+
+        # Loop through contours and plot each one
+        for contour in contours:
+            # The contour points are in (row, column) format, so we flip them to (x, y)
+            contour = contour.squeeze(axis=1)
+            x = contour[:, 1]
+            y = contour[:, 0]
+
+            # Create a polygon and add it to the plot
+            polygon = mpatches.Polygon(xy=list(zip(x, y)),
+                                       fill=False,
+                                       linewidth=1,
+                                       color='r')
+            ax.add_patch(polygon)
+
+    # Set the limits to match the size of the raster
+    ax.set_xlim(0, segmentation_mask.shape[1])
+    ax.set_ylim(0, segmentation_mask.shape[0])
+    ax.set_aspect('equal', 'box')
+
+    # Invert the y-axis to match the raster's orientation
+    ax.invert_yaxis()
+
+    fig.savefig(output_path)

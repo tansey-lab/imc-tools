@@ -149,7 +149,9 @@ def deepcell_nuclear_segment_all_and_plot(mcd_file: str, channels_to_use=None, p
             return panorama_img, labeled_rois
 
 
-def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_index=0):
+def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_index=0,
+                     flow_threshold=0.4,
+                     cellprob_threshold=0):
     cellpose_model = cellpose.models.Cellpose(model_type="nuclei")
 
     with MCDFile(mcd_file) as f:
@@ -180,7 +182,9 @@ def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_
             )
 
         masks, flows, styles, diams = cellpose_model.eval(
-            [channel_data], diameter=None, channels=[0, 0]
+            [channel_data], diameter=None, channels=[0, 0],
+            flow_threshold=flow_threshold,
+            cellprob_threshold=cellprob_threshold
         )
 
         return masks, flows, styles, diams

@@ -31,7 +31,9 @@ dependencies = [
     "opencv-contrib-python",
     "higra",
     "scikit-learn",
-    "matplotlib"
+    "matplotlib",
+    "geopandas",
+    "shapely"
 ]
 
 [project.optional-dependencies]
