@@ -9,9 +9,7 @@ RUN git clone https://github.com/cgal/cgal-swig-bindings && \
     cd build/CGAL-5.0_release && \
     mkdir /cgal_python && \
     cmake -DCGAL_DIR=/usr/include/CGAL -DEIGEN3_INCLUDE_DIR=/usr/include/eigen3 -DBUILD_PYTHON=ON -DBUILD_JAVA=OFF -DPYTHON_OUTDIR_PREFIX=/usr/local/lib/python3.11/site-packages -DCMAKE_BUILD_TYPE=Release ../.. && \
-    make -j4 && \
-    cd / && \
-    rm -rf cgal-swig-bindings
+    make -j4
 
 RUN pip install ipython
 RUN mkdir -p /app
