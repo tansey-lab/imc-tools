@@ -67,7 +67,38 @@ def cellpose_cyto_segment(
             return panorama_img, mask_arrays
 
 
-def deepcell_nuclear_segment(mcd_file: str, channels_to_use=None, panorama_index=0):
+def deepcell_nuclear_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_index=0):
+    import deepcell.applications
+
+    app = deepcell.applications.NuclearSegmentation()
+
+    with MCDFile(mcd_file) as f:
+        slide, acquisition = get_acquisition(f, slide_index, acquisition_index)
+
+
+        acquisition_arr = f.read_acquisition(acquisition)
+        channel_data = extract_channels(
+            acquisition, acquisition_arr, channels_to_use
+        )
+        if len(channels_to_use) == 1:
+            channel_data = remove_outliers(
+                extract_channel(
+                    acquisition, acquisition_arr, channels_to_use[0]
+                )
+            )[np.newaxis, ..., np.newaxis]
+        elif len(channels_to_use) > 1:
+            channel_data = remove_outliers(
+                extract_maximum_projection_of_channels(
+                    acquisition, acquisition_arr, channels_to_use
+                )
+            )[np.newaxis, ..., np.newaxis]
+        labeled_nuclear_arr = app.predict(channel_data, image_mpp=1.0)
+        labeled_nuclear_arr = labeled_nuclear_arr[0, :, :, 0]
+
+        return labeled_nuclear_arr
+
+
+def deepcell_nuclear_segment_all_and_plot(mcd_file: str, channels_to_use=None, panorama_index=0):
     import deepcell.applications
 
     app = deepcell.applications.NuclearSegmentation()
