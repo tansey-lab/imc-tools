@@ -73,7 +73,9 @@ def deepcell_nuclear_segment(mcd_file: str, channels_to_use, slide_index=0, acqu
     app = deepcell.applications.NuclearSegmentation()
 
     with MCDFile(mcd_file) as f:
-        slide, acquisition = get_acquisition(f, slide_index, acquisition_index)
+        slide, acquisition = get_acquisition(mcd_file=f,
+                                             slide_index=slide_index,
+                                             acquisition_index=acquisition_index)
 
 
         acquisition_arr = f.read_acquisition(acquisition)
@@ -151,7 +153,9 @@ def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_
     cellpose_model = cellpose.models.Cellpose(model_type="nuclei")
 
     with MCDFile(mcd_file) as f:
-        slide, acquisition = get_acquisition(f, slide_index, acquisition_index)
+        slide, acquisition = get_acquisition(mcd_file=f,
+                                             slide_index=slide_index,
+                                             acquisition_index=acquisition_index)
 
 
         acquisition_arr = f.read_acquisition(acquisition)
@@ -161,13 +165,17 @@ def cellpose_segment(mcd_file: str, channels_to_use, slide_index=0, acquisition_
         if len(channels_to_use) == 1:
             channel_data = remove_outliers(
                 extract_channel(
-                    acquisition, acquisition_arr, channels_to_use[0]
+                    acquisition=acquisition,
+                    acquisition_arr=acquisition_arr,
+                    selected_channel=channels_to_use[0]
                 )
             )
         elif len(channels_to_use) > 1:
             channel_data = remove_outliers(
                 extract_maximum_projection_of_channels(
-                    acquisition, acquisition_arr, channels_to_use
+                    acquisition=acquisition,
+                    acquisition_arr=acquisition_arr,
+                    selected_channels=channels_to_use
                 )
             )
 
