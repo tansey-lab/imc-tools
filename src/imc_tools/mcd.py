@@ -334,6 +334,11 @@ def extract_all_used_channels(acquisition, acquisition_arr):
     return extract_channels(acquisition, acquisition_arr, all_channels)
 
 
+def get_used_channels_for_acquisition(mcd_fn, slide_idx = 0, acquisition_idx = 0):
+    with MCDFile(mcd_fn) as f:
+        slide, acquisition = get_acquisition(slide_idx, acquisition_idx, f)
+        return [c[1] for c in get_channels(acquisition)]
+
 def extract_maximum_projection_of_channels(
     acquisition, acquisition_arr, selected_channels
 ):

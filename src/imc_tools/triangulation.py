@@ -1,4 +1,5 @@
 import geopandas
+import tqdm
 from scipy.ndimage import center_of_mass
 import numpy as np
 from shapely import Polygon, Point
@@ -6,6 +7,8 @@ from geopandas import GeoDataFrame
 from scipy.spatial import Voronoi
 
 from imc_tools.images import raster_to_polygon, contour_triangle_to_poly
+from imc_tools.mcd import extract_channel_to_arr, get_used_channels_for_acquisition
+import cv2
 
 
 def mask_to_centroids(segmented_image):
@@ -13,8 +16,6 @@ def mask_to_centroids(segmented_image):
     idx = idx[idx != 0]
 
     gdf = GeoDataFrame(index=idx, columns=['nucleus_centroid', 'nucleus'])
-
-
 
     unique_segments = np.unique(segmented_image)
 
@@ -32,15 +33,20 @@ def mask_to_centroids(segmented_image):
 
 
 def get_voronoi_cell_shapes(vor, bounding_polygon):
-    for r in range(len(vor.point_region)):
-        region = vor.regions[vor.point_region[r]]
-        if not -1 in region:
-            voronoi_polygon = Polygon([vor.vertices[i] for i in region])
-
-            clipped_polygon = voronoi_polygon.intersection(bounding_polygon)
-            if not clipped_polygon.exterior.is_closed:
-                raise RuntimeError("Voronoi cell is not closed")
-
+    for region_index in vor.point_region:
+        region = vor.regions[region_index]
+        if not -1 in region:  # Bounded regions
+            polygon = Polygon([vor.vertices[i] for i in region])
+            clipped_polygon = polygon.intersection(bounding_polygon)
+            yield clipped_polygon
+        else:  # Unbounded regions
+            polygon_vertices = [vor.vertices[i] for i in region if i != -1]
+            if len(polygon_vertices) < 3:  # Skip invalid polygons
+                continue
+            polygon = Polygon(polygon_vertices)
+            clipped_polygon = polygon.intersection(bounding_polygon)
+            if clipped_polygon.is_empty:  # No intersection
+                continue
             yield clipped_polygon
 
 
@@ -58,19 +64,46 @@ def add_voronoi_cell_bodies(gdf, bounding_polygon):
         else:
             raise RuntimeError("Multiple nuclei in one voronoi cell")
 
-
-def nucleus_mask_to_voronoi_cell_bodies(segmented_image):
-    bounding_polygon = Polygon([(0, 0),
-                                (0, segmented_image.shape[1]-1),
-                                (segmented_image.shape[0]-1, segmented_image.shape[1]-1),
-                                (segmented_image.shape[0]-1, 0)])
-
-    gdf = mask_to_centroids(segmented_image)
-    add_voronoi_cell_bodies(gdf, bounding_polygon)
-    return gdf
+    gdf['voronoi_cell_area'] = gdf.set_geometry('voronoi_cell_body').area
 
 
 def get_gdf_for_constrained_triangulation(result):
     polys = [contour_triangle_to_poly(x) for x in result.triangles()]
     gdf = geopandas.GeoDataFrame(index=range(len(polys)), geometry=polys)
     return gdf
+
+
+def nucleus_mask_to_voronoi_cell_bodies(segmented_image):
+    bounding_polygon = Polygon([(0, 0),
+                                (0, segmented_image.shape[1] - 1),
+                                (segmented_image.shape[0] - 1, segmented_image.shape[1] - 1),
+                                (segmented_image.shape[0] - 1, 0)])
+
+    gdf = mask_to_centroids(segmented_image)
+    add_voronoi_cell_bodies(gdf, bounding_polygon)
+    return gdf
+
+
+def polygon_to_mask(poly, area):
+    mask = np.zeros_like(area).astype(np.uint8)
+
+    # get list of border points as tuples from poly
+    border_points = np.array(poly.exterior.coords).astype(np.int32)
+
+    # Fill the polygon in the mask
+    cv2.fillPoly(mask, [border_points], 1)
+
+    return mask.astype(bool)
+
+
+def add_total_signal_to_cell_body_gdf(mcd_fn, gdf):
+    channels = get_used_channels_for_acquisition(mcd_fn)
+
+    for channel in tqdm.tqdm(channels):
+        signal_arr = extract_channel_to_arr(mcd_fn, channel, slide_idx=0, acquisition_idx=0)
+
+        def get_pseudocount(poly):
+            mask = polygon_to_mask(poly, signal_arr)
+            return np.sum(signal_arr[mask])
+
+        gdf[f"{channel}__pseudocount"] = gdf['voronoi_cell_body'].apply(lambda x: get_pseudocount(x) if x else None)

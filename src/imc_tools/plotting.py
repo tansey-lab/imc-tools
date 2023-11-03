@@ -25,6 +25,60 @@ def plot_polygon(polygon):
     plt.legend()
     plt.show()
 
+
+def plot_cell_body_voronoi(gdf):
+    fig, ax = plt.subplots(figsize=(10, 10))
+
+    # Plot polygons
+    gdf.set_geometry('voronoi_cell_body').boundary.plot(ax=ax,
+                                           color='blue',
+                                           label='Voronoi Cell Body')
+
+    # Plot points
+    gdf.set_geometry('nucleus_centroid').plot(ax=ax, color='red', markersize=5, label='Nucleus Centroid')
+
+    # Set labels, title, and legend
+    plt.xlabel('X')
+    plt.ylabel('Y')
+
+    # Show the plot
+    plt.show()
+
+
+def plot_cell_body_pseudocount(gdf, channel_name):
+    ax = gdf.set_geometry('voronoi_cell_body').plot(column=f'{channel_name}__pseudocount',
+                                                    cmap='viridis',
+                                                    legend=True,
+                                                    figsize=(10, 10))
+
+    # Set labels, title, and axes equal
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    # flip x and y axis
+
+
+    # Show the plot
+    plt.show()
+
+def plot_cell_body_area_averaged_pseudocount(gdf, channel_name):
+    gdf[f'{channel_name}__avg'] = gdf[f'{channel_name}__pseudocount'] / gdf['voronoi_cell_area']
+
+    ax = gdf.set_geometry('voronoi_cell_body').plot(column=f'{channel_name}__avg',
+                                                    cmap='viridis',
+                                                    legend=True,
+                                                    figsize=(10, 10))
+
+    # Set labels, title, and axes equal
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    # flip x and y axis
+
+
+    # Show the plot
+    plt.show()
+
+
+
 def plot_segmentation_borders(segmentation_mask, output_path):
     # Plotting
     fig, ax = plt.subplots()
