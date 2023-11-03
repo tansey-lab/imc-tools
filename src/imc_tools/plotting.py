@@ -32,15 +32,22 @@ def plot_cell_body_voronoi(gdf):
     # Plot polygons
     gdf.set_geometry('voronoi_cell_body').boundary.plot(ax=ax,
                                            color='blue',
-                                           label='Voronoi Cell Body')
+                                           label='Voronoi Cell Body Boundary')
+    gdf.set_geometry('nucleus').boundary.plot(ax=ax,
+                                           color='yellow',
+                                           label='Segmented Nucleus')
 
-    # Plot points
-    gdf.set_geometry('nucleus_centroid').plot(ax=ax, color='red', markersize=5, label='Nucleus Centroid')
+    # Plot points on top of all else
+    gdf.set_geometry('nucleus').plot(ax=ax, color='red', markersize=5,
+                                     label='Nucleus Centroid', zorder=2)
 
     # Set labels, title, and legend
     plt.xlabel('X')
     plt.ylabel('Y')
-
+    #put legend outside plot area
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    ax.set_title(f'Voronoi Cell Bodies and Segmented Nucleus')
+    plt.tight_layout()
     # Show the plot
     plt.show()
 
@@ -55,7 +62,7 @@ def plot_cell_body_pseudocount(gdf, channel_name):
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
     # flip x and y axis
-
+    ax.set_title(f'{channel_name} Total Signal Per Polygon')
 
     # Show the plot
     plt.show()
@@ -71,6 +78,7 @@ def plot_cell_body_area_averaged_pseudocount(gdf, channel_name):
     # Set labels, title, and axes equal
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
+    ax.set_title(f'Area Averaged {channel_name} Signal')
     # flip x and y axis
 
 
