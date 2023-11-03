@@ -3,10 +3,10 @@ import numpy as np
 import tqdm
 from PIL import Image
 from readimc import MCDFile
-from imc_tools.mcd import get_acquisition
+from imc_tools.mcd import get_acquisition, AcquisitionOutOfBoundsError
 
-from imc_tools.images import AcquisitionOutOfBoundsError, \
-    remove_outliers
+from imc_tools.images import remove_outliers, apply_clahe, get_image_gradient, get_segmented_image, \
+    get_mixture_of_two_gaussians_cutoff_point
 from imc_tools.mcd import plot_mask_on_to_panorama, extract_channels_to_rgb, extract_channel, extract_channels, \
     extract_maximum_projection_of_channels
 
@@ -253,3 +253,61 @@ def cellpose_segment_all_and_plot(mcd_file: str,
                     continue
 
             return panorama_img, mask_arrays
+
+
+def get_total_intensity_per_segment(original_image, segmented_image):
+    if original_image.shape != segmented_image.shape:
+        raise ValueError("Image and segmentation must have same shape")
+
+    unique_segments = np.unique(segmented_image)
+
+    means = {}
+    sums = {}
+
+    for unique_segment in unique_segments:
+        means[unique_segment] = original_image[(segmented_image == unique_segment)].mean()
+        sums[unique_segment] = original_image[(segmented_image == unique_segment)].sum()
+
+    return means, sums
+
+
+def get_cell_body_mask(all_channel_sum):
+    clahe_image = apply_clahe(all_channel_sum)
+    gradient_image = get_image_gradient(clahe_image)
+    segmented_image = get_segmented_image(gradient_image, num_regions=500)
+    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
+        original_image=all_channel_sum,
+        segmented_image=segmented_image
+    )
+    cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
+        np.array([x for x in mean_intensity_per_segment.values()])
+    )
+
+    cell_body_segments = [
+     segment_id for segment_id, val in mean_intensity_per_segment.items()
+     if val >= cutoff_point]
+
+    return np.isin(segmented_image, cell_body_segments)
+
+
+def get_cell_body_mask_with_nuclear_segmentation(all_channel_sum, segmentation_mask, num_regions=500):
+    clahe_image = apply_clahe(all_channel_sum)
+    gradient_image = get_image_gradient(clahe_image)
+    segmented_image = get_segmented_image(gradient_image, num_regions=num_regions)
+
+    segmentation_mask = segmentation_mask.copy()
+    segmentation_mask[segmentation_mask > 0] = 1
+
+    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
+        original_image=segmentation_mask,
+        segmented_image=segmented_image
+    )
+    cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
+        np.array([x for x in mean_intensity_per_segment.values()])
+    )
+
+    cell_body_segments = [
+     segment_id for segment_id, val in mean_intensity_per_segment.items()
+     if val >= cutoff_point]
+
+    return np.isin(segmented_image, cell_body_segments)

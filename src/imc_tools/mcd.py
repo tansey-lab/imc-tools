@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from readimc import MCDFile
 
 from imc_tools.images import black_to_alpha, logger, \
-    AcquisitionOutOfBoundsError, remove_outliers, greyscale_to_colored_transparency
+    remove_outliers, greyscale_to_colored_transparency
 
 
 def get_acquisition(slide_index, acquisition_index, mcd_file):
@@ -518,3 +518,7 @@ def plot_channel_onto_panorama(
                 output_dir, f"panorama_overlay_{slide_index}_{channel_label}.png"
             )
         )
+
+
+class AcquisitionOutOfBoundsError(Exception):
+    pass

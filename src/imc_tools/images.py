@@ -1,23 +1,21 @@
 import logging
 import os
 
-import cv2
-import higra as hg
-import numpy as np
 from PIL import Image
 from cv2.ximgproc import createStructuredEdgeDetection
-import numpy as np
-from sklearn.mixture import GaussianMixture
-from scipy.optimize import fsolve
+
 from scipy.stats import norm
 from scipy.optimize import minimize_scalar
+import numpy as np
+import cv2
 
+from shapely.geometry import Polygon
 
 logger = logging.getLogger(__name__)
 
-class AcquisitionOutOfBoundsError(Exception):
-    pass
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
+PRETRAINED_SED_MODEL_PATH = os.path.join(SRC_DIR, "model.yml.gz")
 
 def remove_outliers(arr, percentile=99.5):
     arr = arr.copy()
@@ -70,12 +68,6 @@ def overlay_arrays_as_images(arr1, arr2):
     return overlay
 
 
-
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-
-PRETRAINED_SED_MODEL_PATH = os.path.join(SRC_DIR, "model.yml.gz")
-
-
 def apply_clahe(img):
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     return clahe.apply(img)
@@ -90,6 +82,7 @@ def get_image_gradient(img, model_path=PRETRAINED_SED_MODEL_PATH):
     return (gradient / gradient.max() * 255).astype(np.uint8)
 
 def get_segmented_image(gradient_image, num_regions = 100):
+    import higra as hg
     graph = hg.get_4_adjacency_graph(gradient_image.shape[:2])
     edge_weights = hg.weight_graph(graph, gradient_image, hg.WeightFunction.mean)
     tree, altitudes = hg.watershed_hierarchy_by_area(graph, edge_weights)
@@ -112,23 +105,8 @@ def get_segmented_image(gradient_image, num_regions = 100):
     return mask.astype(np.uint32)
 
 
-def get_total_intensity_per_segment(original_image, segmented_image):
-    if original_image.shape != segmented_image.shape:
-        raise ValueError("Image and segmentation must have same shape")
-
-    unique_segments = np.unique(segmented_image)
-
-    means = {}
-    sums = {}
-
-    for unique_segment in unique_segments:
-        means[unique_segment] = original_image[(segmented_image == unique_segment)].mean()
-        sums[unique_segment] = original_image[(segmented_image == unique_segment)].sum()
-
-    return means, sums
-
-
 def get_mixture_of_two_gaussians_cutoff_point(arr):
+    from sklearn.mixture import GaussianMixture
     # Fit a Gaussian Mixture Model with 2 components
     gmm = GaussianMixture(n_components=2, random_state=0)
     gmm.fit(arr.reshape(-1, 1))
@@ -156,58 +134,6 @@ def get_mixture_of_two_gaussians_cutoff_point(arr):
     cutoff = result.x
 
     return cutoff
-
-
-def get_cell_body_mask(all_channel_sum):
-    clahe_image = apply_clahe(all_channel_sum)
-    gradient_image = get_image_gradient(clahe_image)
-    segmented_image = get_segmented_image(gradient_image, num_regions=500)
-    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
-        original_image=all_channel_sum,
-        segmented_image=segmented_image
-    )
-    cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
-        np.array([x for x in mean_intensity_per_segment.values()])
-    )
-
-    cell_body_segments = [
-     segment_id for segment_id, val in mean_intensity_per_segment.items()
-     if val >= cutoff_point]
-
-    return np.isin(segmented_image, cell_body_segments)
-
-
-def get_cell_body_mask_with_nuclear_segmentation(all_channel_sum, segmentation_mask, num_regions=500):
-    clahe_image = apply_clahe(all_channel_sum)
-    gradient_image = get_image_gradient(clahe_image)
-    segmented_image = get_segmented_image(gradient_image, num_regions=num_regions)
-
-    segmentation_mask = segmentation_mask.copy()
-    segmentation_mask[segmentation_mask > 0] = 1
-
-    mean_intensity_per_segment, total_intensity_per_segment = get_total_intensity_per_segment(
-        original_image=segmentation_mask,
-        segmented_image=segmented_image
-    )
-    cutoff_point = get_mixture_of_two_gaussians_cutoff_point(
-        np.array([x for x in mean_intensity_per_segment.values()])
-    )
-
-    cell_body_segments = [
-     segment_id for segment_id, val in mean_intensity_per_segment.items()
-     if val >= cutoff_point]
-
-    return np.isin(segmented_image, cell_body_segments)
-
-
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-
-
-from shapely.geometry import Polygon
-import geopandas
 
 
 def raster_to_polygon(raster):
@@ -275,47 +201,3 @@ def contour_triangle_to_poly(contour):
     return shapely.geometry.Polygon([(p.x, p.y) for p in contour.vertices])
 
 
-def get_gdf_for_constrained_triangulation(result):
-
-    polys = [contour_triangle_to_poly(x) for x in result.triangles()]
-    gdf = geopandas.GeoDataFrame(index=range(len(polys)), geometry=polys)
-    return gdf
-
-
-def plot_segmentation_borders(segmentation_mask, output_path):
-    # Plotting
-    fig, ax = plt.subplots()
-
-    for i in np.unique(segmentation_mask):
-        segment_of_interest = (segmentation_mask == i).astype(bool).astype(np.uint8)
-        segment_of_interest[segment_of_interest > 0] = 255
-        # Find contours in the binary image
-        contours, hierarchy = cv2.findContours(segment_of_interest.astype(np.uint8),
-                                               cv2.RETR_EXTERNAL,
-                                               cv2.CHAIN_APPROX_SIMPLE)
-
-
-
-        # Loop through contours and plot each one
-        for contour in contours:
-            # The contour points are in (row, column) format, so we flip them to (x, y)
-            contour = contour.squeeze(axis=1)
-            x = contour[:, 1]
-            y = contour[:, 0]
-
-            # Create a polygon and add it to the plot
-            polygon = mpatches.Polygon(xy=list(zip(x, y)),
-                                       fill=False,
-                                       linewidth=1,
-                                       color='r')
-            ax.add_patch(polygon)
-
-    # Set the limits to match the size of the raster
-    ax.set_xlim(0, segmentation_mask.shape[1])
-    ax.set_ylim(0, segmentation_mask.shape[0])
-    ax.set_aspect('equal', 'box')
-
-    # Invert the y-axis to match the raster's orientation
-    ax.invert_yaxis()
-
-    fig.savefig(output_path)
