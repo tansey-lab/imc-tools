@@ -206,6 +206,82 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 
+from shapely.geometry import Polygon
+import geopandas
+
+
+def raster_to_polygon(raster):
+    # Find contours in the binary image
+    contours, hierarchy = cv2.findContours(raster.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Initialize lists to hold outer contours and holes
+    outer_contours = []
+    holes = []
+
+    for i, contour in enumerate(contours):
+        # The contour points are in (row, column) format, so we flip them to (x, y)
+        coords = contour.squeeze(axis=1)
+        xy = [(p[1], p[0]) for p in coords]
+
+        # Check if this contour has a parent
+        if hierarchy[0][i][3] == -1:
+            # No parent, so it's an external contour
+            outer_contours.append(xy)
+        else:
+            # Has a parent, so it's a hole
+            holes.append(xy)
+
+    # Assuming single polygon, we take the first outer contour
+    # You can loop over outer_contours to create multiple polygons if needed
+    if outer_contours:
+        exterior = outer_contours[0]
+        interior = holes
+        return Polygon(exterior, holes=interior)
+
+
+import ground.core.geometries
+
+def raster_to_sect_polygon(raster):
+    # Find contours in the binary image
+    contours, hierarchy = cv2.findContours(raster.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Initialize lists to hold outer contours and holes
+    outer_contours = []
+    holes = []
+
+    for i, contour in enumerate(contours):
+        # The contour points are in (row, column) format, so we flip them to (x, y)
+        coords = contour.squeeze(axis=1)
+        xy = [ground.core.geometries.Point(p[1], p[0]) for p in coords]
+
+        # Check if this contour has a parent
+        if hierarchy[0][i][3] == -1:
+            # No parent, so it's an external contour
+            outer_contours.append(ground.core.geometries.Contour(xy))
+        else:
+            # Has a parent, so it's a hole
+            holes.append(ground.core.geometries.Contour(xy))
+
+    # Assuming single polygon, we take the first outer contour
+    # You can loop over outer_contours to create multiple polygons if needed
+    if outer_contours:
+        exterior = outer_contours[0]
+        interior = holes
+        return ground.core.geometries.Polygon(border=exterior, holes=interior)
+
+import shapely.geometry
+
+def contour_triangle_to_poly(contour):
+    return shapely.geometry.Polygon([(p.x, p.y) for p in contour.vertices])
+
+
+def get_gdf_for_constrained_triangulation(result):
+
+    polys = [contour_triangle_to_poly(x) for x in result.triangles()]
+    gdf = geopandas.GeoDataFrame(index=range(len(polys)), geometry=polys)
+    return gdf
+
+
 def plot_segmentation_borders(segmentation_mask, output_path):
     # Plotting
     fig, ax = plt.subplots()
